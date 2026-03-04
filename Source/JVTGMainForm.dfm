@@ -17,9 +17,52 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
     Left = 0
     Top = 0
     Width = 840
-    Height = 33
+    Height = 61
     Align = alTop
     TabOrder = 0
+    object pnlIncremental: TPanel
+      Left = 1
+      Top = 32
+      Width = 838
+      Height = 28
+      Align = alBottom
+      BevelOuter = bvNone
+      TabOrder = 1
+      object lblLastRevisionId: TLabel
+        Left = 108
+        Top = 6
+        Width = 85
+        Height = 16
+        Caption = 'Last RevisionId'
+      end
+      object chkIncremental: TCheckBox
+        Left = 6
+        Top = 5
+        Width = 92
+        Height = 17
+        Caption = 'Incremental'
+        TabOrder = 0
+        OnClick = chkIncrementalClick
+      end
+      object edtLastRevisionId: TEdit
+        Left = 209
+        Top = 3
+        Width = 140
+        Height = 24
+        TabOrder = 1
+        Text = '0'
+        OnExit = edtLastRevisionIdExit
+      end
+      object btnResetIncremental: TButton
+        Left = 358
+        Top = 2
+        Width = 90
+        Height = 25
+        Caption = 'Reset to 0'
+        TabOrder = 2
+        OnClick = btnResetIncrementalClick
+      end
+    end
     object pnlGitRepos: TGridPanel
       Left = 1
       Top = 1
@@ -113,6 +156,7 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
         Height = 23
         Align = alClient
         TabOrder = 3
+        OnExit = edtNewGitRepoPathExit
         ExplicitHeight = 24
       end
       object lblNewGitRepoPath: TLabel
@@ -209,44 +253,46 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
   end
   object pnlMainqq: TPanel
     Left = 0
-    Top = 33
+    Top = 61
     Width = 840
-    Height = 487
+    Height = 459
     Align = alClient
     Caption = 'pnlMain'
     TabOrder = 1
     object Splitter: TSplitter
       Left = 1
-      Top = 375
+      Top = 347
       Width = 838
       Height = 3
       Cursor = crVSplit
       Align = alBottom
       ResizeStyle = rsUpdate
+      ExplicitTop = 375
     end
     object pnlMain: TPanel
       Left = 1
       Top = 1
       Width = 838
-      Height = 374
+      Height = 346
       Align = alClient
       BevelOuter = bvNone
       Caption = 'pnlMasterDetail'
       TabOrder = 0
       object DBGridSplitter: TSplitter
         Left = 0
-        Top = 257
+        Top = 229
         Width = 838
         Height = 3
         Cursor = crVSplit
         Align = alBottom
         ResizeStyle = rsUpdate
+        ExplicitTop = 257
       end
       object DBGrid: TDBGrid
         Left = 0
         Top = 0
         Width = 838
-        Height = 257
+        Height = 229
         Align = alClient
         Color = clBtnFace
         DataSource = RevisionsDataSource
@@ -260,7 +306,7 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
       end
       object BlobsGrid: TDBGrid
         Left = 0
-        Top = 260
+        Top = 232
         Width = 838
         Height = 114
         Align = alBottom
@@ -276,7 +322,7 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
     end
     object lbxGitOutput: TListBox
       Left = 1
-      Top = 378
+      Top = 350
       Width = 838
       Height = 108
       Style = lbOwnerDrawFixed
@@ -337,6 +383,7 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
       '  INNER JOIN vcslog VL ON L.LOGID = VL.LOGID'
       'WHERE'
       '  P.NAME LIKE !ProjectNamePattern'
+      '  AND R.REVISIONID > !MinRevisionId'
       'ORDER BY'
       '  VL.TSTAMP,'
       '  M.MODULEID,'
@@ -348,18 +395,28 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
       item
         Value = #39'%'#39
         Name = 'PROJECTNAMEPATTERN'
+      end
+      item
+        Value = '0'
+        Name = 'MINREVISIONID'
       end>
   end
   object BlobsFDQuery: TFDQuery
-    IndexFieldNames = 'revisionid'
     MasterSource = RevisionsDataSource
     MasterFields = 'revisionid'
     Connection = FDConnection
     SQL.Strings = (
       'SELECT *'
-      'FROM Blobs')
+      'FROM Blobs'
+      'WHERE revisionid = :revisionid')
     Left = 640
     Top = 344
+    ParamData = <
+      item
+        DataType = ftLargeint
+        Name = 'REVISIONID'
+        ParamType = ptInput
+      end>
   end
   object BlobsDataSource: TDataSource
     DataSet = BlobsFDQuery

@@ -73,10 +73,19 @@ Type
     edtOldGitRepoPath: TEdit;
     lbxGitOutput: TListBox;
     chkStatus: TCheckBox;
+    pnlIncremental: TPanel;
+    chkIncremental: TCheckBox;
+    lblLastRevisionId: TLabel;
+    edtLastRevisionId: TEdit;
+    btnResetIncremental: TButton;
     Procedure btnGetRevisionsClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure edtNewGitRepoPathExit(Sender: TObject);
     procedure edtProjectNamePatternExit(Sender: TObject);
+    procedure chkIncrementalClick(Sender: TObject);
+    procedure btnResetIncrementalClick(Sender: TObject);
+    procedure edtLastRevisionIdExit(Sender: TObject);
     procedure StatusBarDrawPanel(StatusBar: TStatusBar; Panel: TStatusPanel; const Rect: TRect);
     procedure lbxGitOutputDrawItem(Control: TWinControl; Index: Integer; Rect: TRect;
       State: TOwnerDrawState);
@@ -110,9 +119,16 @@ Type
     FPercentage          : Double;
     FRelativePaths       : TStringList;
     FOldGitRepoPath      : String;
+    FSessionMaxRevisionID: Int64;
   Strict Protected
     Procedure LoadSettings;
     Procedure SaveSettings;
+    Procedure LoadIncrementalState;
+    Function GetIncrementalScopeKey: String;
+    Function GetIncrementalIniSection: String;
+    Procedure ApplyRevisionFilter;
+    Procedure SetLastRevisionID(Const iValue: Int64);
+    Function GetLastRevisionID: Int64;
     Procedure CommitToGit(Const strComment: String; Const dtCommitDateTime: TDateTime);
     Procedure ProcessMsgevent(Const strMsg: String; Var boolAbort: Boolean;
       Const MsgType : TMsgType = mtInformation);
@@ -187,6 +203,12 @@ Const
   dblPercentageMultiplier = 100.0;
   (** An ini key for whether the GIT STATUS should be shown. **)
   strShowStatusKey = 'ShowStatus';
+  (** An ini key for whether incremental mode is enabled. **)
+  strIncrementalEnabledKey = 'IncrementalEnabled';
+  (** An ini key for the last imported revision ID. **)
+  strLastRevisionIDKey = 'LastRevisionID';
+  (** An ini section prefix for scoped incremental settings. **)
+  strIncrementalIniSectionPrefix = 'Incremental';
 
 Function DGHFindOnPath(var strEXEName : String; Const strDirs : String) : Boolean; Forward;
 
@@ -316,11 +338,13 @@ Const
 
 ResourceString
   strDFMSummary = 'DFM summary: converted=%d, force-added=%d';
+  strNoNewRevisionsFound = 'No new revisions found.';
 
 Var
   iDFMConvertedCount: Integer;
   iDFMForceAddedCount: Integer;
   boolAbort: Boolean;
+  boolCompleted: Boolean;
 
   (**
 
@@ -527,6 +551,7 @@ Var
     strBlobZip = 'Blob.zip';
     strComment_i = 'comment_i';
     strTSTAMP = 'TSTAMP';
+    strRevisionID = 'REVISIONID';
    
   Var
     strZipFileName: String;
@@ -535,6 +560,8 @@ Var
     strZipFileName := FNewGitRepoPath + strBlobZip;
     While Not RevisionsDataSource.DataSet.Eof Do
       Begin
+        If RevisionsDataSource.DataSet.FieldByName(strRevisionID).AsLargeInt > FSessionMaxRevisionID Then
+          FSessionMaxRevisionID := RevisionsDataSource.DataSet.FieldByName(strRevisionID).AsLargeInt;
         ProcessBlobs(strZipFileName);
         CommitToGit(RevisionsDataSource.DataSet.FieldByName(strComment_i).AsString,
           RevisionsDataSource.DataSet.FieldByName(strTSTAMP).AsDateTime);
@@ -550,6 +577,9 @@ Begin
   iDFMConvertedCount := 0;
   iDFMForceAddedCount := 0;
   boolAbort := False;
+  boolCompleted := False;
+  FSessionMaxRevisionID := GetLastRevisionID;
+  ApplyRevisionFilter;
   CheckGitRepoPath;
   CheckThereIsAnExistingGitRepo;
   DBGrid.ReadOnly := True;
@@ -558,14 +588,25 @@ Begin
     FStartTime := GetTickCount64;
     RevisionsDataSource.DataSet.Last;
     FItemCount := RevisionsDataSource.DataSet.RecordCount;
+    If FItemCount = 0 Then
+      Begin
+        ProcessMsgevent(strNoNewRevisionsFound, boolAbort);
+        Exit;
+      End;
     RevisionsDataSource.DataSet.First;
     ProcessRevisions;
+    boolCompleted := True;
     ProcessMsgevent(Format(strDFMSummary, [iDFMConvertedCount, iDFMForceAddedCount]),
       boolAbort);
   Finally
     DBGrid.ReadOnly := False;
     BlobsGrid.ReadOnly := False;;
   End;
+  If boolCompleted And chkIncremental.Checked And (FSessionMaxRevisionID > GetLastRevisionID) Then
+    Begin
+      SetLastRevisionID(FSessionMaxRevisionID);
+      SaveSettings;
+    End;
 End;
 
 (**
@@ -964,13 +1005,101 @@ End;
 **)
 Procedure TfrmJEDIVCSToGit.edtProjectNamePatternExit(Sender: TObject);
 
+Begin
+  LoadIncrementalState;
+  chkIncrementalClick(Nil);
+End;
+
+(**
+
+  This method reloads incremental scope when the new git repository path changes.
+
+  @precon  None.
+  @postcon Reloads scoped incremental settings and reapplies filters.
+
+  @param   Sender as a TObject
+
+**)
+Procedure TfrmJEDIVCSToGit.edtNewGitRepoPathExit(Sender: TObject);
+
+Begin
+  LoadIncrementalState;
+  chkIncrementalClick(Nil);
+End;
+
+(**
+
+  This is an on click event handler for toggling incremental mode.
+
+  @precon  None.
+  @postcon Enables/disables incremental controls and reapplies filters.
+
+  @param   Sender as a TObject
+
+**)
+Procedure TfrmJEDIVCSToGit.chkIncrementalClick(Sender: TObject);
+
+Begin
+  edtLastRevisionId.Enabled := chkIncremental.Checked;
+  btnResetIncremental.Enabled := chkIncremental.Checked;
+  ApplyRevisionFilter;
+End;
+
+(**
+
+  This is an on click event handler to reset the incremental revision marker.
+
+  @precon  None.
+  @postcon Resets the last revision marker to 0.
+
+  @param   Sender as a TObject
+
+**)
+Procedure TfrmJEDIVCSToGit.btnResetIncrementalClick(Sender: TObject);
+
+Begin
+  SetLastRevisionID(0);
+  ApplyRevisionFilter;
+End;
+
+(**
+
+  This is an on exit event handler for the LastRevisionId edit control.
+
+  @precon  None.
+  @postcon Normalizes entered revision marker and reapplies filters.
+
+  @param   Sender as a TObject
+
+**)
+Procedure TfrmJEDIVCSToGit.edtLastRevisionIdExit(Sender: TObject);
+
+Begin
+  SetLastRevisionID(GetLastRevisionID);
+  ApplyRevisionFilter;
+End;
+
+(**
+
+  This method applies query macros for project pattern and minimum revision filter while preserving
+  DB grid column widths.
+
+  @precon  None.
+  @postcon Revisions query is refreshed with the current filter values.
+
+**)
+Procedure TfrmJEDIVCSToGit.ApplyRevisionFilter;
+
 Const
   strProjectNamePatternMacro = 'ProjectNamePattern';
+  strMinRevisionIDMacro = 'MinRevisionId';
 
 Var
-  M: TFDMacro;
+  ProjectMacro: TFDMacro;
+  MinRevisionMacro: TFDMacro;
   iColumn: Integer;
   aiColumnWidths : TArray<Integer>;
+  iMinRevisionID: Int64;
 
 Begin
   If FDConnection.Connected Then
@@ -978,12 +1107,129 @@ Begin
       SetLength(aiColumnWidths, DBGrid.Columns.Count);
       For iColumn := 0 To DBGrid.Columns.Count - 1 Do
         aiColumnWidths[iColumn] := DBGrid.Columns[iColumn].Width;
-      M := RevisionsFDQuery.MacroByName(strProjectNamePatternMacro);
-      M.Value := ''''+edtProjectNamePattern.Text+'''';
+      iMinRevisionID := 0;
+      If chkIncremental.Checked Then
+        iMinRevisionID := GetLastRevisionID;
+      ProjectMacro := RevisionsFDQuery.MacroByName(strProjectNamePatternMacro);
+      ProjectMacro.Value := ''''+edtProjectNamePattern.Text+'''';
+      MinRevisionMacro := RevisionsFDQuery.MacroByName(strMinRevisionIDMacro);
+      MinRevisionMacro.Value := IntToStr(iMinRevisionID);
+      RevisionsFDQuery.Active := False;
       RevisionsFDQuery.Active := True;
       For iColumn := 0 To DBGrid.Columns.Count - 1 Do
         DBGrid.Columns[iColumn].Width := aiColumnWidths[iColumn];
     End;
+End;
+
+(**
+
+  This method updates the LastRevisionID edit value.
+
+  @precon  None.
+  @postcon LastRevisionID UI value is normalized and updated.
+
+  @param   iValue as an Int64 as a constant
+
+**)
+Procedure TfrmJEDIVCSToGit.SetLastRevisionID(Const iValue: Int64);
+
+Var
+  iMarker: Int64;
+
+Begin
+  iMarker := iValue;
+  If iMarker < 0 Then
+    iMarker := 0;
+  edtLastRevisionID.Text := IntToStr(iMarker);
+End;
+
+(**
+
+  This method returns the normalized LastRevisionID value.
+
+  @precon  None.
+  @postcon Returns LastRevisionID as a non-negative Int64.
+
+  @return  an Int64
+
+**)
+Function TfrmJEDIVCSToGit.GetLastRevisionID: Int64;
+
+Begin
+  Result := StrToInt64Def(Trim(edtLastRevisionID.Text), 0);
+  If Result < 0 Then
+    Result := 0;
+End;
+
+(**
+
+  This method builds a normalized scope key for incremental migration state based on
+  the new repository path and project pattern.
+
+  @precon  None.
+  @postcon Returns a normalized scope key using repository + pattern.
+
+  @return  a String
+
+**)
+Function TfrmJEDIVCSToGit.GetIncrementalScopeKey: String;
+
+Var
+  strScope: String;
+  iChar: Integer;
+
+Begin
+  strScope := UpperCase(Trim(edtNewGitRepoPath.Text)) + '|' +
+    UpperCase(Trim(edtProjectNamePattern.Text));
+  If strScope = '|' Then
+    strScope := 'DEFAULT';
+  For iChar := 1 To Length(strScope) Do
+    If Not CharInSet(strScope[iChar], ['A'..'Z', '0'..'9']) Then
+      strScope[iChar] := '_';
+  Result := strScope;
+End;
+
+(**
+
+  This method builds a scoped INI section name for incremental migration state.
+
+  @precon  None.
+  @postcon Returns a section namespaced by repository + pattern.
+
+  @return  a String
+
+**)
+Function TfrmJEDIVCSToGit.GetIncrementalIniSection: String;
+
+Begin
+  Result := strIncrementalIniSectionPrefix + '_' + GetIncrementalScopeKey;
+End;
+
+(**
+
+  This method loads incremental state from INI for the current repository + pattern scope.
+
+  @precon  None.
+  @postcon Incremental controls are populated from scoped INI values.
+
+**)
+Procedure TfrmJEDIVCSToGit.LoadIncrementalState;
+
+Var
+  iniFile: TMemIniFile;
+  iLastRevisionID: Int64;
+  strSection: String;
+
+Begin
+  iniFile := TMemIniFile.Create(ChangeFileExt(ParamStr(0), strIniExt));
+  Try
+    strSection := GetIncrementalIniSection;
+    chkIncremental.Checked := iniFile.ReadBool(strSection, strIncrementalEnabledKey, False);
+    iLastRevisionID := StrToInt64Def(iniFile.ReadString(strSection, strLastRevisionIDKey, '0'), 0);
+    SetLastRevisionID(iLastRevisionID);
+  Finally
+    iniFile.Free;
+  End;
 End;
 
 (**
@@ -1061,6 +1307,7 @@ Begin
   FItem := 0;
   FGitPI.boolEnabled := True;
   FGitPI.strEXE := strGITExe;
+  FSessionMaxRevisionID := 0;
   If (ParamCount > 0) And FileExists(ParamStr(1)) Then
     Begin
       FDConnection.Params.LoadFromFile(ParamStr(1));
@@ -1075,6 +1322,7 @@ Begin
   FRelativePaths := TStringList.Create;
   FRelativePaths.Duplicates := dupIgnore;
   LoadSettings;
+  chkIncrementalClick(nil);
 End;
 
 (**
@@ -1231,6 +1479,7 @@ Const
 Var
   iniFile: TMemIniFile;
   iColumn : Integer;
+  strSection: String;
 
 Begin
   iniFile := TMemIniFile.Create(ChangeFileExt(ParamStr(0), strIniExt));
@@ -1255,7 +1504,9 @@ Begin
   Finally
     iniFile.Free;
   End;
+  LoadIncrementalState;
   edtProjectNamePatternExit(Nil);
+  chkIncrementalClick(Nil);
 End;
 
 (**
@@ -1312,6 +1563,7 @@ Procedure TfrmJEDIVCSToGit.SaveSettings;
 Var
   iniFile: TMemIniFile;
   iColumn : Integer;
+  strSection: String;
 
 Begin
   iniFile := TMemIniFile.Create(ChangeFileExt(ParamStr(0), strIniExt));
@@ -1332,6 +1584,9 @@ Begin
     iniFile.WriteInteger(strSetupIniSection, strOutputHeightKey, lbxGitOutput.Height);
     iniFile.WriteInteger(strSetupIniSection, strBlobGridHeightKey, BlobsGrid.Height);
     iniFile.WriteBool(strSetupINISection, strShowStatusKey, chkStatus.Checked);
+    strSection := GetIncrementalIniSection;
+    iniFile.WriteBool(strSection, strIncrementalEnabledKey, chkIncremental.Checked);
+    iniFile.WriteString(strSection, strLastRevisionIDKey, IntToStr(GetLastRevisionID));
     iniFile.UpdateFile;
   Finally
     iniFile.Free;

@@ -32,3 +32,20 @@ During the process a number of prompts will require handling as follows:
 As the application is processing the revisions and committing them the Git commands and their messages are output to a listview at the bottom which is saved to the file `Git.log` in the new Git repository root.
 
 If any error occur (which hopefully they don't), a dialgoue will appear with the Git error and the option to **Abort** or **Ignore**.
+
+## Incremental mode
+
+The application supports incremental migration based on `REVISIONID`.
+
+ * Enable **Incremental** to import only revisions newer than **Last RevisionId**.
+ * The incremental state is stored per scope: **New Git Repo Path + Project Name Pattern**.
+ * If no matching new revisions are found, the log shows: `No new revisions found.`
+
+### When the incremental marker is saved
+
+`Last RevisionId` is persisted to INI:
+
+ * after a successful migration run (when the max processed `REVISIONID` increases);
+ * when the application closes.
+
+Manual UI changes (toggle, reset, edit value) are not written immediately unless one of the above events occurs.
