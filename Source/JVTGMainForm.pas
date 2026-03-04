@@ -45,7 +45,7 @@ Uses
   FireDAC.DApt,
   FireDAC.Comp.DataSet,
   Vcl.StdCtrls,
-  Vcl.ExtCtrls, Vcl.ComCtrls;
+  Vcl.ExtCtrls, Vcl.ComCtrls, FireDAC.Phys.FB, FireDAC.Phys.FBDef;
 
 Type
   (** A form to hold data sets from the JED VCS database containing the revisions and blobs. **)
@@ -314,6 +314,14 @@ Procedure TfrmJEDIVCSToGit.btnGetRevisionsClick(Sender: TObject);
 Const
   strGitStatus = 'status';
 
+ResourceString
+  strDFMSummary = 'DFM summary: converted=%d, force-added=%d';
+
+Var
+  iDFMConvertedCount: Integer;
+  iDFMForceAddedCount: Integer;
+  boolAbort: Boolean;
+
   (**
 
     This method processes the blobs associated with a revision and adds them to the git repo.
@@ -326,6 +334,67 @@ Const
 
   **)
   Function ProcessBlobs(Const strZipFileName : String) : Integer;
+
+    (**
+
+      This method converts binary DFM files to text DFM files.
+
+      @precon  strFileName must be a valid file path.
+      @postcon If the file is a binary DFM file it is converted to text.
+
+      @param   strFileName as a String as a constant
+
+    **)
+    Function ConvertBinaryDFMToText(Const strFileName: String): Boolean;
+
+    ResourceString
+      strCouldNotResetReadOnly = 'Could not reset read-only attribute for "%s" when converting DFM to text.';
+
+    Const
+      strDFMExtension = '.dfm';
+    Var
+      fsIn: TFileStream;
+      fsOut: TFileStream;
+      msText: TMemoryStream;
+      aSig: Array[0..3] Of AnsiChar;
+      iAttr: Integer;
+
+    Begin
+      Result := False;
+      If Not SameText(ExtractFileExt(strFileName), strDFMExtension) Then
+        Exit;
+      If Not FileExists(strFileName) Then
+        Exit;
+      fsIn := TFileStream.Create(strFileName, fmOpenRead Or fmShareDenyWrite);
+      Try
+        If fsIn.Size < SizeOf(aSig) Then
+          Exit;
+        fsIn.ReadBuffer(aSig, SizeOf(aSig));
+        If Not ((aSig[0] = 'T') And (aSig[1] = 'P') And (aSig[2] = 'F') And (aSig[3] = '0')) Then
+          Exit;
+        fsIn.Position := 0;
+        iAttr := FileGetAttr(strFileName);
+        If (iAttr <> -1) And ((iAttr And Integer(faReadOnly)) <> 0) Then
+          If FileSetAttr(strFileName, iAttr And (Not Integer(faReadOnly))) <> 0 Then
+            Raise Exception.CreateFmt(strCouldNotResetReadOnly, [strFileName]);
+        msText := TMemoryStream.Create;
+        Try
+          ObjectBinaryToText(fsIn, msText);
+          msText.Position := 0;
+          fsOut := TFileStream.Create(strFileName, fmCreate);
+          Try
+            fsOut.CopyFrom(msText, 0);
+            Result := True;
+          Finally
+            fsOut.Free;
+          End;
+        Finally
+          msText.Free;
+        End;
+      Finally
+        fsIn.Free;
+      End;
+    End;
 
     (**
 
@@ -344,15 +413,15 @@ Const
       strFileNeedsRenaming = 'The file "%s" needs renaming to "%s"!';
     
     Const
-      strModuleName = 'Module Name';
+      strModuleName = 'ModuleName';
       strExtension = 'Extension';
       strMoveParams = 'mv -v "%s" "%s%s"';
-    
+
     Var
       strOldFileName: String;
       strRepoFileName: String;
       strActualPathAndFile: String;
-    
+
     Begin
       strRepoFileName :=
         RevisionsDataSource.DataSet.FieldByName(strModuleName).AsString + '.' +
@@ -371,15 +440,19 @@ Const
           End;
       FFileNames.Values[strRepoFilename] := strFileToExtract;
     End;
-  
+
   ResourceString
     strExtracting = 'Extracting: %s';
-  
+    strConvertingDFM = 'Converting binary DFM to text: %s';
+    strForceAddingDFM = 'Force adding DFM (ignored by git rules): %s';
+
   Const
     strFileData = 'FileData';
-    strAddParams = 'add -v "%s"';
+    strAddParams = 'add -v -- "%s"';
+    strAddForcedParams = 'add -v -f -- "%s"';
     strPath = 'path';
-    strModuleName = 'Module Name';
+    strModuleName = 'ModuleName';
+    strDFMExtension = '.dfm';
 
   Var
     Z: TZipFile;
@@ -411,7 +484,21 @@ Const
                     boolAbort);
                   strActualFileCase := strSubDir + Z.FileName[iFile];
                   strActualFileCase := GetActualPathAndFileCase(strActualFileCase);
-                  ExecuteGit(Format(strAddParams, [strActualFileCase]));
+                  If SameText(ExtractFileExt(strActualFileCase), strDFMExtension) Then
+                    Begin
+                      ProcessMsgevent(Format(strConvertingDFM, [strActualFileCase]), boolAbort);
+                      If ConvertBinaryDFMToText(FNewGitRepoPath + strActualFileCase) Then
+                        Inc(iDFMConvertedCount);
+                      ProcessMsgevent(Format(strForceAddingDFM, [strActualFileCase]), boolAbort);
+                      ExecuteGit(Format(strAddForcedParams, [strActualFileCase]));
+                      Inc(iDFMForceAddedCount);
+                    End
+                  Else
+                    Begin
+                      If ConvertBinaryDFMToText(FNewGitRepoPath + strActualFileCase) Then
+                        Inc(iDFMConvertedCount);
+                      ExecuteGit(Format(strAddParams, [strActualFileCase]));
+                    End;
                   Inc(Result);
                   If chkStatus.Checked Then
                     ExecuteGit(strGitStatus);
@@ -460,6 +547,9 @@ Const
   End;
 
 Begin
+  iDFMConvertedCount := 0;
+  iDFMForceAddedCount := 0;
+  boolAbort := False;
   CheckGitRepoPath;
   CheckThereIsAnExistingGitRepo;
   DBGrid.ReadOnly := True;
@@ -470,6 +560,8 @@ Begin
     FItemCount := RevisionsDataSource.DataSet.RecordCount;
     RevisionsDataSource.DataSet.First;
     ProcessRevisions;
+    ProcessMsgevent(Format(strDFMSummary, [iDFMConvertedCount, iDFMForceAddedCount]),
+      boolAbort);
   Finally
     DBGrid.ReadOnly := False;
     BlobsGrid.ReadOnly := False;;
@@ -566,7 +658,7 @@ End;
 Procedure TfrmJEDIVCSToGit.CommitToGit(Const strComment: String; Const dtCommitDateTime: TDateTime);
 
 Const
-  strCommitDate = 'commit -v --date "%s" -m "%s"';
+  strCommitDate = 'commit -v --allow-empty --date "%s" -m "%s"';
   strDateFmt = 'dd/mmm/yyyy HH:nn:ss';
 
 Var
@@ -576,6 +668,11 @@ Begin
   strCleanComment := StringReplace(strComment, '"', '''', [rfReplaceAll]);
   strCleanComment := StringReplace(strCleanComment, #13, '', [rfReplaceAll]);
   strCleanComment := StringReplace(strCleanComment, #10, '\n', [rfReplaceAll]);
+  if Trim(strCleanComment) = '' then
+  begin
+    strCleanComment := 'pusty';
+  end;
+
   ExecuteGit(Format(strCommitDate, [FormatDateTime(strDateFmt, dtCommitDateTime), strCleanComment]));
 End;
 
@@ -882,7 +979,7 @@ Begin
       For iColumn := 0 To DBGrid.Columns.Count - 1 Do
         aiColumnWidths[iColumn] := DBGrid.Columns[iColumn].Width;
       M := RevisionsFDQuery.MacroByName(strProjectNamePatternMacro);
-      M.Value := edtProjectNamePattern.Text;
+      M.Value := ''''+edtProjectNamePattern.Text+'''';
       RevisionsFDQuery.Active := True;
       For iColumn := 0 To DBGrid.Columns.Count - 1 Do
         DBGrid.Columns[iColumn].Width := aiColumnWidths[iColumn];
@@ -1116,6 +1213,7 @@ Begin
   strText := lbxGitOutput.Items[Index];
   lbxGitOutput.Canvas.TextRect(Rect, strText, [tfLeft, tfVerticalCenter]);
 End;
+
 
 (**
 

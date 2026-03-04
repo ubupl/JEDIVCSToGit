@@ -68,3 +68,5 @@ __recovery/
 # Specific files to ignore
 SQLQuery1.sql
 Win32/
+db/VCS.fbk
+db/VCS.FDB

@@ -10,12 +10,10 @@ object frmExtractRelPath: TfrmExtractRelPath
   Font.Height = -13
   Font.Name = 'Tahoma'
   Font.Style = []
-  OldCreateOrder = False
   Position = poMainFormCenter
   DesignSize = (
     608
     164)
-  PixelsPerInch = 96
   TextHeight = 16
   object lblExistingGitRepoPath: TLabel
     Left = 8

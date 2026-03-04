@@ -43,7 +43,7 @@ Type
   Strict Protected
     Class Procedure AddTrailingSlash(Var strPath : String);
     Class Function  CheckPathExists(Const boolResult : Boolean; Const strNewGitRepoPath : String;
-      Var strRelPath : String) : Boolean;
+      Var strRelPath : String; confirmDirectory : Boolean) : Boolean;
   Public
     Class Function Execute(Const slPaths : TStringList; Const RepoData : TJVTGRepoData;
       Var strRelPath : String) : Boolean;
@@ -85,7 +85,7 @@ End;
 
 **)
 Class Function TfrmExtractRelPath.CheckPathExists(Const boolResult : Boolean;
-  Const strNewGitRepoPath : String; Var strRelPath : String) : Boolean;
+  Const strNewGitRepoPath : String; Var strRelPath : String; confirmDirectory : Boolean) : Boolean;
 
 ResourceString
   strCreateDirectory = 'Create Directory';
@@ -94,7 +94,7 @@ ResourceString
 Begin
   Result := boolResult;
   If Not DirectoryExists(strNewGitRepoPath + strRelPath) Then
-    If InputQuery(Application.Title, strCreateDirectory, strRelPath) Then
+    If not confirmDirectory or InputQuery(Application.Title, strCreateDirectory, strRelPath) Then
       Begin
         AddTrailingSlash(strRelPath);
         If Not ForceDirectories(strNewGitRepoPath + strRelPath) Then
@@ -170,7 +170,7 @@ Begin
       strRelPath := slPaths.ValueFromIndex[iIndex];
       Result := True;
     End;
-  Result := CheckPathExists(Result, RepoData.FNEWGitRepoPath, strRelPath);
+  Result := CheckPathExists(Result, RepoData.FNEWGitRepoPath, strRelPath, False);
 End;
 
 End.

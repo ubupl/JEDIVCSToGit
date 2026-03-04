@@ -10,10 +10,8 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
   Font.Height = -13
   Font.Name = 'Tahoma'
   Font.Style = []
-  OldCreateOrder = False
   OnCreate = FormCreate
   OnDestroy = FormDestroy
-  PixelsPerInch = 96
   TextHeight = 16
   object pnlTop: TPanel
     Left = 0
@@ -109,44 +107,50 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
         31)
       object edtNewGitRepoPath: TEdit
         AlignWithMargins = True
-        Left = 556
+        Left = 557
         Top = 4
         Width = 92
         Height = 23
         Align = alClient
         TabOrder = 3
+        ExplicitHeight = 24
       end
       object lblNewGitRepoPath: TLabel
         AlignWithMargins = True
-        Left = 436
+        Left = 437
         Top = 4
         Width = 114
-        Height = 26
+        Height = 23
         Align = alClient
         Caption = 'New Git Repo Path'
         Layout = tlCenter
+        ExplicitWidth = 106
+        ExplicitHeight = 16
       end
       object lblOldGitRepoPath: TLabel
         AlignWithMargins = True
         Left = 223
         Top = 4
         Width = 109
-        Height = 26
+        Height = 23
         Align = alClient
         Caption = 'Old Git Repo Path'
         Layout = tlCenter
+        ExplicitWidth = 100
+        ExplicitHeight = 16
       end
       object edtOldGitRepoPath: TEdit
         AlignWithMargins = True
         Left = 338
         Top = 4
-        Width = 92
+        Width = 93
         Height = 23
         Align = alClient
         TabOrder = 2
+        ExplicitHeight = 24
       end
       object btnGetRevisions: TButton
-        Left = 732
+        Left = 733
         Top = 3
         Width = 97
         Height = 25
@@ -160,10 +164,12 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
         Left = 4
         Top = 4
         Width = 129
-        Height = 26
+        Height = 23
         Align = alClient
         Caption = 'Project Name Pattern'
         Layout = tlCenter
+        ExplicitWidth = 122
+        ExplicitHeight = 16
       end
       object edtProjectNamePattern: TEdit
         AlignWithMargins = True
@@ -175,10 +181,11 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
         TabOrder = 1
         Text = 'edtProjectNamePattern'
         OnExit = edtProjectNamePatternExit
+        ExplicitHeight = 24
       end
       object chkStatus: TCheckBox
         AlignWithMargins = True
-        Left = 654
+        Left = 655
         Top = 4
         Width = 69
         Height = 23
@@ -287,15 +294,19 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
   end
   object FDConnection: TFDConnection
     Params.Strings = (
-      'SERVER=SEASONSFALL0001\SQLEXPRESS2008'
-      'OSAuthent=Yes'
+      'Server=localhost'
+      'OSAuthent=No'
       'ApplicationName=Enterprise/Architect/Ultimate'
       'Workstation=SEASONSFALL0001'
       'MARS=yes'
       'ODBCAdvanced=ServerSPN=JEDIVCS24'
-      'Database=JEDIVCS24'
-      'DriverID=MSSQL'
-      'User_Name=sysdba')
+      'Database=c:\dev\pronet\utils\JEDIVCSToGit\db\VCS.FDB'
+      'DriverID=FB'
+      'User_Name=sysdba'
+      'Password=Radzio'
+      'SQLDialect=1'
+      'Port=3030'
+      'Protocol=TCPIP')
     LoginPrompt = False
     Left = 80
     Top = 104
@@ -309,9 +320,15 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
     Connection = FDConnection
     SQL.Strings = (
       'SELECT DISTINCT'
-      '  M.MODULEID, M.NAME AS [Module Name], M.PATH,'
-      '  R.REVISIONID, R.VERSION, R.REVISION, R.COMMENT_I,'
-      '  VL.TSTAMP, VL.DESCRIPTION'
+      '  M.MODULEID,'
+      '  M.NAME AS ModuleName,'
+      '  M.PATH,'
+      '  R.REVISIONID,'
+      '  R.VERSION,'
+      '  R.REVISION,'
+      '  R.COMMENT_I,'
+      '  VL.TSTAMP,'
+      '  VL.DESCRIPTION'
       'FROM projects P'
       '  INNER JOIN pjmodule PM ON P.PROJECTID = PM.PROJECTID'
       '  INNER JOIN modules M ON PM.MODULEID = M.MODULEID'
@@ -321,14 +338,16 @@ object frmJEDIVCSToGit: TfrmJEDIVCSToGit
       'WHERE'
       '  P.NAME LIKE !ProjectNamePattern'
       'ORDER BY'
-      '  TSTAMP, MODULEID, VERSION, REVISION')
+      '  VL.TSTAMP,'
+      '  M.MODULEID,'
+      '  R.VERSION,'
+      '  R.REVISION;')
     Left = 632
     Top = 96
     MacroData = <
       item
-        Value = 'BrowseAndDocIt%'
+        Value = #39'%'#39
         Name = 'PROJECTNAMEPATTERN'
-        DataType = mdString
       end>
   end
   object BlobsFDQuery: TFDQuery
